@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Lemon.Tools</AssemblyName>
+    <RootNamespace>Lemon.Tools</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <BaseOutputPath></BaseOutputPath>
+    <BaseIntermediateOutputPath />
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mono.Cecil" Version="0.11.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Service Include="{508349b6-6b84-4df5-91f0-309beebad82d}" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lemon.Attributes\Lemon.Attributes.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Lemon.Tools\Emitter\EmitterGen.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>EmitterGen.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Lemon.Tools\Emitter\EmitterGen.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>EmitterGen.tt</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+</Project>
