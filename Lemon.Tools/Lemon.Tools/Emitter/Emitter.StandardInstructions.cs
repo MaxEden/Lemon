@@ -113,10 +113,20 @@ namespace Lemon.Tools
         {
             return Emit(OpCodes.Ldfld, fieldReference);
         }
+        
+        public Emitter LdSFld(FieldReference fieldReference)
+        {
+            return Emit(OpCodes.Ldsfld, fieldReference);
+        }
 
         public Emitter StFld(FieldReference fieldReference)
         {
             return Emit(OpCodes.Stfld, fieldReference);
+        }
+        
+        public Emitter StSFld(FieldReference fieldReference)
+        {
+            return Emit(OpCodes.Stsfld, fieldReference);
         }
 
         public Emitter LdArg(params ParameterDefinition[] @params)

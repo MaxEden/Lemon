@@ -20,7 +20,7 @@
     var opcodes = new[]
     {        
         "Dup","Pop","Sub",
-        "Ret","Add"
+        "Ret","Add", "Nop"
     };
 #>
 using System; 

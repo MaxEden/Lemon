@@ -105,5 +105,9 @@ namespace Lemon.Tools
         {
             return Emit(OpCodes.Add);
         }
+        public Emitter Nop()
+        {
+            return Emit(OpCodes.Nop);
+        }
     }
 }

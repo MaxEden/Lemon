@@ -10,13 +10,13 @@ namespace Lemon.Tools
     {
         public static string GetLineInfo(this MethodDefinition method, Instruction instruction)
         {
-            if(!method.DebugInformation.HasSequencePoints) return "unknown file:unknown line";
+            if (!method.DebugInformation.HasSequencePoints) return "unknown file:unknown line";
 
             var seqPoints = method.DebugInformation.SequencePoints;
             var seqPoint = seqPoints[0];
-            for(int i = 0; i < seqPoints.Count; i++)
+            for (int i = 0; i < seqPoints.Count; i++)
             {
-                if(seqPoints[i].Offset < instruction.Offset)
+                if (seqPoints[i].Offset < instruction.Offset)
                 {
                     seqPoint = seqPoints[i];
                     return seqPoint.Document.Url + ":" + seqPoint.StartLine;
@@ -28,32 +28,32 @@ namespace Lemon.Tools
 
         public static IReadOnlyList<MethodReference> GetCalledMethods(this MethodDefinition method)
         {
-            if(!method.HasBody || method.Body.Instructions == null || method.Body.Instructions.Count == 0)
+            if (!method.HasBody || method.Body.Instructions == null || method.Body.Instructions.Count == 0)
             {
                 return Array.Empty<MethodReference>();
             }
 
             var result = method.Body.Instructions
-                .Where(i => i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt)
-                .Select(i => (MethodReference)i.Operand)
-                .Distinct()
-                .ToList();
+                               .Where(i => i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt)
+                               .Select(i => (MethodReference)i.Operand)
+                               .Distinct()
+                               .ToList();
 
             return result;
         }
 
         public static IReadOnlyList<MethodReference> GetUsedDelegates(this MethodDefinition method)
         {
-            if(!method.HasBody || method.Body.Instructions == null || method.Body.Instructions.Count == 0)
+            if (!method.HasBody || method.Body.Instructions == null || method.Body.Instructions.Count == 0)
             {
                 return Array.Empty<MethodReference>();
             }
 
             var result = method.Body.Instructions
-                .Where(i => i.OpCode == OpCodes.Ldftn)
-                .Select(i => (MethodReference)i.Operand)
-                .Distinct()
-                .ToList();
+                               .Where(i => i.OpCode == OpCodes.Ldftn)
+                               .Select(i => (MethodReference)i.Operand)
+                               .Distinct()
+                               .ToList();
             return result;
         }
 
@@ -61,18 +61,18 @@ namespace Lemon.Tools
         {
             var param = method.Parameters[index];
             var paramType = param.ParameterType;
-            if(method is GenericInstanceMethod gMethod && paramType is GenericInstanceType gType)
+            if (method is GenericInstanceMethod gMethod && paramType is GenericInstanceType gType)
             {
                 var newGType = new GenericInstanceType(gType.ElementType);
-                foreach(var genericArgument in gType.GenericArguments)
+                foreach (var genericArgument in gType.GenericArguments)
                 {
                     var name = genericArgument.FullName;
-                    if(name.StartsWith("!!"))
+                    if (name.StartsWith("!!"))
                     {
                         var mIndex = int.Parse(name.Substring(2));
                         newGType.GenericArguments.Add(gMethod.GenericArguments[mIndex]);
                     }
-                    else if(name.StartsWith("!"))
+                    else if (name.StartsWith("!"))
                     {
                         var tIndex = int.Parse(name.Substring(1));
                         var decType = (GenericInstanceType)gMethod.DeclaringType;
@@ -85,32 +85,48 @@ namespace Lemon.Tools
 
             return paramType;
         }
-        
+
         public static bool SameSignature(this MethodReference method, MethodReference other)
         {
-            if(!method.ReturnType.SameName(other.ReturnType)) return false;
-            if(method.Parameters.Count != other.Parameters.Count) return false;
+            if (!method.ReturnType.SameName(other.ReturnType)) return false;
+            if (method.Parameters.Count != other.Parameters.Count) return false;
 
-            for(int i = 0; i < method.Parameters.Count; i++)
+            for (int i = 0; i < method.Parameters.Count; i++)
             {
-                if(!method.Parameters[i].ParameterType.SameName(other.Parameters[i].ParameterType)) return false;
+                if (!method.Parameters[i].ParameterType.SameName(other.Parameters[i].ParameterType)) return false;
             }
 
             return true;
         }
-        
+
+        public static bool SameSignatureAsStatic(this MethodReference method, MethodReference staticMethod)
+        {
+            if (staticMethod.HasThis) throw new ArgumentException(staticMethod + "is not static");
+            if (!method.ReturnType.SameName(staticMethod.ReturnType)) return false;
+            if (method.Parameters.Count + 1 != staticMethod.Parameters.Count) return false;
+            if (!method.DeclaringType.Resolve().Is(staticMethod.Parameters[0].ParameterType)) return false;
+
+            for (int i = 0; i < method.Parameters.Count; i++)
+            {
+                if (!method.Parameters[i].ParameterType.SameName(staticMethod.Parameters[i + 1].ParameterType))
+                    return false;
+            }
+
+            return true;
+        }
+
         public static TypeReference GetDelegateType(this MethodReference method)
         {
             var module = method.Module;
-            if(method.ReturnType == module.TypeSystem.Void)
+            if (method.ReturnType == module.TypeSystem.Void)
             {
-                if(method.Parameters.Count == 0)
+                if (method.Parameters.Count == 0)
                 {
                     return module.ImportType<Action>();
                 }
 
                 TypeReference openType = null;
-                switch(method.Parameters.Count)
+                switch (method.Parameters.Count)
                 {
                     case 1:
                         openType = module.ImportOpenGenericType<Action<int>>();
@@ -130,7 +146,7 @@ namespace Lemon.Tools
 
                 var instance = new GenericInstanceType(openType);
 
-                foreach(var argument in method.Parameters.Select(p => p.ParameterType))
+                foreach (var argument in method.Parameters.Select(p => p.ParameterType))
                     instance.GenericArguments.Add(argument);
 
                 return instance;
@@ -138,7 +154,7 @@ namespace Lemon.Tools
             else
             {
                 TypeReference openType = null;
-                switch(method.Parameters.Count)
+                switch (method.Parameters.Count)
                 {
                     case 0:
                         openType = module.ImportOpenGenericType<Func<int>>();
@@ -161,7 +177,7 @@ namespace Lemon.Tools
 
                 var instance = new GenericInstanceType(openType);
 
-                foreach(var argument in method.Parameters.Select(p => p.ParameterType))
+                foreach (var argument in method.Parameters.Select(p => p.ParameterType))
                     instance.GenericArguments.Add(argument);
 
                 instance.GenericArguments.Add(method.ReturnType);
@@ -171,7 +187,7 @@ namespace Lemon.Tools
 
         public static Instruction LastRet(this MethodDefinition self)
         {
-            if(self.Body.Instructions.Count == 0)
+            if (self.Body.Instructions.Count == 0)
             {
                 self.Body.GetILProcessor().Emit(OpCodes.Ret);
             }

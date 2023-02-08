@@ -15,6 +15,16 @@ namespace Lemon.Tools
             return DerivedFrom<T>(typeDef);
         }
         
+        public static bool Is(this TypeReference type, TypeReference other)
+        {
+            var otherR = other.Resolve();
+            if(type.FullName == otherR.FullName) return true;
+            if(otherR.IsInterface) return type.Implements(otherR);
+            var typeDef = type as TypeDefinition;
+            if(typeDef == null) typeDef = type.Resolve();
+            return typeDef.DerivedFrom(other);
+        }
+        
         public static bool IsExact<T>(this TypeReference type) where T : class
         {
             return type.FullName == typeof(T).FullName;
@@ -23,6 +33,11 @@ namespace Lemon.Tools
         public static bool Implements<T>(this TypeReference type) where T : class
         {
             return Implements(type, typeof(T).FullName);
+        }
+        
+        public static bool Implements(this TypeReference type, TypeReference other)
+        {
+            return Implements(type, other.FullName);
         }
 
         public static bool Implements(this TypeReference typeRef, string interfaceFullName)
@@ -67,6 +82,11 @@ namespace Lemon.Tools
             {
                 return false;
             }
+        }
+        
+        public static bool DerivedFrom(this TypeDefinition type, TypeReference baseType)
+        {
+            return DerivedFrom(type, baseType.FullName);
         }
 
         public static bool DerivedFrom<T>(this TypeDefinition type)
