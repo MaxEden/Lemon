@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
-using Lemon.Attributes;
 using Lemon.Tools;
 using Mono.Cecil;
 
@@ -69,7 +67,7 @@ namespace Lemon
         {
             if(fileInfo.Name.EndsWith(".Weaver.dll")) return false;
             if(fileInfo.Name.EndsWith("_.dll")) return false;
-            return ReadAndCheck(fileInfo, p => p.HasAttribute<WeaveMeAttribute>());
+            return ReadAndCheck(fileInfo, p => p.HasAttribute("WeaveMeAttribute"));
         }
 
         private static bool ReadAndCheck(FileInfo fileInfo, Func<AssemblyDefinition, bool> check)

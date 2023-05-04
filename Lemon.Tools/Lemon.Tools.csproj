@@ -18,10 +18,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Lemon.Attributes\Lemon.Attributes.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
     <None Update="Lemon.Tools\Emitter\EmitterGen.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>EmitterGen.cs</LastGenOutput>

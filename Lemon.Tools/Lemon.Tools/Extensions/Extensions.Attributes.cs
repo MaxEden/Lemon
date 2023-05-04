@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using Lemon.Attributes;
 using Mono.Cecil;
 
 namespace Lemon.Tools
@@ -61,12 +60,12 @@ namespace Lemon.Tools
 
         public static bool TryGetLemonAttr(this ICustomAttributeProvider provider, out string text)
         {
-            return TryGetStringAttribute<LemonAttribute>(provider, out text);
+            return TryGetStringAttribute(provider, "LemonAttribute", out text);
         }
 
         public static bool HasLemonAttr(this ICustomAttributeProvider provider, string text)
         {
-            TryGetStringAttribute<LemonAttribute>(provider, out var attrText);
+            TryGetStringAttribute(provider, "LemonAttribute", out var attrText);
             return attrText != null && attrText == text;
         }
 
