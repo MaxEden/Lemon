@@ -53,24 +53,7 @@ namespace Lemon
             return false;
         }
 
-        public static List<FileInfo> SearchTargetDlls(List<FileInfo> files)
-        {
-            return files.Where(IsTargetDll).ToList();
-        }
-
-        public static bool IsStampedDll(FileInfo fileInfo)
-        {
-            return ReadAndCheck(fileInfo, p => p.MainModule.GetType("Weaver", "Stamp") != null);
-        }
-
-        private static bool IsTargetDll(FileInfo fileInfo)
-        {
-            if(fileInfo.Name.EndsWith(".Weaver.dll")) return false;
-            if(fileInfo.Name.EndsWith("_.dll")) return false;
-            return ReadAndCheck(fileInfo, p => p.HasAttribute("WeaveMeAttribute"));
-        }
-
-        private static bool ReadAndCheck(FileInfo fileInfo, Func<AssemblyDefinition, bool> check)
+        public static bool ReadAndCheck(FileInfo fileInfo, Func<AssemblyDefinition, bool> check)
         {
             try
             {

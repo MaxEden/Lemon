@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Lemon.Lemon;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
@@ -28,7 +29,7 @@ namespace Lemon
             {
                 //TODO Console.WriteLine(target.FileInfo.FullName);
 
-                if (!Searcher.IsStampedDll(target.FileInfo))
+                if (!Conventions.IsStampedDll(target.FileInfo))
                 {
                     FileCopy(target.AssemblyPath, GetBackupPath(target.AssemblyPath));
                     FileCopy(target.AssemblyPath, GetBackupPath2(target.AssemblyPath));
