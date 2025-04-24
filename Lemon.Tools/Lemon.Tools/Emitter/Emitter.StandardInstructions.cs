@@ -148,14 +148,16 @@ namespace Lemon.Tools
                     throw new ArgumentException("parameter must be declared in method definition before using it");
                 }
 
-                if(MethodDefinition.HasThis)
-                {
-                    LdArg((uint)param.Index + 1);
-                }
-                else
-                {
-                    LdArg((uint)param.Index);
-                }
+                Emit(OpCodes.Ldarg, param);
+
+                // if (MethodDefinition.HasThis)
+                // {
+                //     LdArg((uint)param.Index + 1);
+                // }
+                // else
+                // {
+                //     LdArg((uint)param.Index);
+                // }
             }
 
             return this;
