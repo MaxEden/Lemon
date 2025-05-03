@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Threading.Tasks;
 using Lemon.Lemon;
 using Lemon.Tools;
+using Lemon.Tools.Weavers;
 using Mono.Cecil;
 using Mono.Cecil.Mdb;
 using Mono.Cecil.Pdb;
@@ -22,12 +23,13 @@ namespace Lemon
 
         private LemonAssemblyResolver _resolver;
 
-        static Processor()
-        {
-            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolve;
-        }
+        // static Processor()
+        // {
+        //     AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolve;
+        // }
 
         public bool AutoBackupAndRestore { get; set; }
+        public bool ReadDebugSymbols { get; set; } = true;
 
         private static Assembly CurrentDomainAssemblyResolve(object sender, ResolveEventArgs args)
         {
@@ -56,6 +58,8 @@ namespace Lemon
                 _resolver = null;
             }
 
+            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolve;
+
             _resolver = new LemonAssemblyResolver();
             _resolver.AddSearchDirectory(Path.GetDirectoryName(typeof(object).Assembly.Location));
             foreach (var info in _searchDirectories)
@@ -69,12 +73,12 @@ namespace Lemon
             }
         }
 
-        public void TargetAssemblies(params string[] filePaths)
+        public void AddTargetAssemblies(IList<string> filePaths)
         {
-            TargetAssemblies(filePaths.Select(p => new FileInfo(p)).ToList());
+            AddTargetAssemblies(filePaths.Select(p => new FileInfo(p)).ToArray());
         }
 
-        public void TargetAssemblies(List<FileInfo> files)
+        public void AddTargetAssemblies(params FileInfo[] files)
         {
             foreach (var file in files)
             {
@@ -85,22 +89,34 @@ namespace Lemon
 
                 readerParameters.AssemblyResolver = _resolver;
 
-                if (Searcher.SearchDebugSymbols(file, out var symbolType, out var symbolPath))
+                string symbolPath = null;
+
+                if (ReadDebugSymbols)
                 {
-                    if (symbolType == SymbolType.Mdb)
+                    if (Searcher.SearchDebugSymbols(file, out var symbolType, out symbolPath))
                     {
-                        readerParameters.SymbolReaderProvider = new MdbReaderProvider();
-                        writerParameters.SymbolWriterProvider = new MdbWriterProvider();
-                    }
+                        if (symbolType == SymbolType.Mdb)
+                        {
+                            readerParameters.SymbolReaderProvider = new MdbReaderProvider();
+                            writerParameters.SymbolWriterProvider = new MdbWriterProvider();
+                        }
 
-                    if (symbolType == SymbolType.Pdb)
-                    {
-                        readerParameters.SymbolReaderProvider = new PdbReaderProvider();
-                        writerParameters.SymbolWriterProvider = new PdbWriterProvider();
-                    }
+                        if (symbolType == SymbolType.Pdb)
+                        {
+                            readerParameters.SymbolReaderProvider = new PdbReaderProvider();
+                            writerParameters.SymbolWriterProvider = new PdbWriterProvider();
+                        }
 
-                    readerParameters.ReadSymbols = true;
-                    writerParameters.WriteSymbols = true;
+                        readerParameters.ReadSymbols = true;
+                        writerParameters.WriteSymbols = true;
+                    }
+                }
+                else
+                {
+                    readerParameters.ReadSymbols = false;
+                    writerParameters.WriteSymbols = false;
+                    readerParameters.SymbolReaderProvider = null;
+                    writerParameters.SymbolWriterProvider = null;
                 }
 
                 readerParameters.InMemory = true;
@@ -124,6 +140,24 @@ namespace Lemon
             Backuper.RestoreDlls(_targetInfos.Values);
         }
 
+        public void FreeAssembliesAndDispose()
+        {
+            var targets = _targetInfos.Values.ToList();
+            targets.Sort(_resolver);
+
+            foreach (var target in targets)
+            {
+                _resolver.Release(target.AssemblyName);
+            }
+
+            foreach (var target in targets)
+            {
+                target.OpenAssemblyDefinition.Dispose();
+            }
+
+            Dispose();
+        }
+
         public void WriteAssembliesAndDispose()
         {
             var targets = _targetInfos.Values.ToList();
@@ -139,6 +173,8 @@ namespace Lemon
 
                 _resolver.Release(target.AssemblyName);
                 target.OpenAssemblyDefinition.Write(target.AssemblyPath, target.WriterParameters);
+
+                //target.OpenAssemblyDefinition.Write(target.AssemblyPath, target.WriterParameters);
                 //target.OpenAssemblyDefinition.Dispose();
                 //TargetInfos.Remove(target.FileInfo.FullName);
             }
@@ -155,15 +191,19 @@ namespace Lemon
         {
             if (_resolver != null)
             {
+                AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomainAssemblyResolve;
+
                 _resolver.Dispose();
                 _resolver = null;
                 Cache.Instance.Clear();
-                //GC.Collect();
-                //GC.WaitForPendingFinalizers();
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
             }
         }
 
-        public List<AssemblyDefinition> Read()
+        public LemonAssemblyResolver Resolver => _resolver;
+
+        private List<AssemblyDefinition> Read()
         {
             Cache.Instance.Clear();
             PrepareResolver();
@@ -175,70 +215,72 @@ namespace Lemon
                 var target = pair.Value;
 
                 _log(target.AssemblyPath);
-                if (!AutoBackupAndRestore && Conventions.IsStampedDll(target.FileInfo))
-                {
-                    _log("Already weaved: " + target.Name);
-                    continue;
-                }
+                // if (!AutoBackupAndRestore && Conventions.IsStampedDll(target.FileInfo))
+                // {
+                //     _log("Already weaved: " + target.Name);
+                //     continue;
+                // }
 
                 try
                 {
+
+                    if (!ReadDebugSymbols)
+                    {
+                        target.ReaderParameters.ReadSymbols = false;
+                        target.WriterParameters.WriteSymbols = false;
+                        target.ReaderParameters.SymbolReaderProvider = null;
+                        target.WriterParameters.SymbolWriterProvider = null;
+                    }
+
                     var assembly = AssemblyDefinition.ReadAssembly(target.AssemblyPath, target.ReaderParameters);
-                    if (assembly == null) continue;
+                    if (assembly == null)
+                    {
+                        _log("Couldn't load: " + target.Name);
+                        continue;
+                    }
+
+                    if (assembly.MainModule.GetType("Weaver", "Stamp") != null)
+                    {
+                        _log("Already weaved: " + target.Name);
+                        assembly.Dispose();
+                        continue;
+                    }
 
                     target.OpenAssemblyDefinition = assembly;
-                    target.AssemblyName = assembly.FullName;
+                    target.AssemblyFullName = assembly.FullName;
+                    target.AssemblyName = assembly.Name.Name;
+
+                    _resolver.AddRead(assembly);
                 }
                 catch (System.BadImageFormatException)
                 {
                     _log("not managed dll. skipping." + target.Name);
                     _targetInfos.Remove(pair.Key);
                     continue;
-                }              
+                }
             }
 
             var values = _targetInfos.Values.Select(p => p.OpenAssemblyDefinition).ToList();
             return values;
         }
 
-        public void Process(IEnumerable<object> weavers)
-        {
-            _log("===WEAVING===");
-
-            var values = Read();
-
-            foreach (var weaver in weavers)
-            {
-                var weaverType = weaver.GetType();
-                var weaverName = weaverType.Assembly.GetName().Name;
-                var weaverMethod = weaverType.GetMethod(nameof(IWeaver.Weave));
-                _log($"Weaving with {weaverName} --------------------------------------");
-                weaverMethod.Invoke(weaver, new object[] { values, _log });
-
-                _log($"Weaving with {weaverName} is done ------------------------------");
-            }
-        }
-
-        public void Process(Action<List<AssemblyDefinition>, Action<string>> weaveAction)
+        public void Process(Action<List<AssemblyDefinition>, Action<string>> weaveAction, string name = null)
         {
             _log("===WEAVING===");
 
             var values = Read();
             try
             {
-                _log($"Weaving with {weaveAction.Method.DeclaringType.Name}.{weaveAction.Method.Name}");
+                name ??= weaveAction.Method.DeclaringType.Name + "." + weaveAction.Method.Name;
+                _log($"Weaving with {name}");
                 weaveAction(values, _log);
             }
-            catch
+            catch (Exception exception)
             {
+                _log("EXCEPTION " + exception);
                 Dispose();
                 throw;
             }
-        }
-
-        private void AddSearchDirectory(DirectoryInfo searchDirectory)
-        {
-            _searchDirectories.Add(searchDirectory.FullName);
         }
 
         public class TargetInfo
@@ -246,7 +288,8 @@ namespace Lemon
             public FileInfo FileInfo;
             public string AssemblyPath => FileInfo.FullName;
             public string Name => FileInfo.Name;
-            public string AssemblyName { get; set; }
+            public string AssemblyName { get; internal set; }
+            public string AssemblyFullName { get; internal set; }
 
             public string SymbolPath;
             public ReaderParameters ReaderParameters;
@@ -255,12 +298,12 @@ namespace Lemon
             public AssemblyDefinition OpenAssemblyDefinition;
         }
 
-        public void AddDirectories(params string[] directories)
+        public void AddLookUpDirectories(params string[] directories)
         {
             Searcher.SearchDlls(out var dlls, out var dllDirs, directories);
             foreach (var dir in dllDirs)
             {
-                AddSearchDirectory(dir);
+                _searchDirectories.Add(dir.FullName);
             }
 
             _dlls.AddRange(dlls);
@@ -268,7 +311,7 @@ namespace Lemon
 
         public void SearchTargets(Func<FileInfo, bool> isTarget)
         {
-            TargetAssemblies(_dlls.Where(isTarget).ToList());
+            AddTargetAssemblies(_dlls.Where(isTarget).ToArray());
         }
     }
 }

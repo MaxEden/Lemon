@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using Mono.Cecil;
 
-namespace Lemon.Tools
+namespace Lemon.Tools.Weavers
 {
     public interface IWeaver
     {

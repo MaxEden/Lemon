@@ -1,56 +1,82 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Xml.Linq;
 using Mono.Cecil;
 
 namespace Lemon
 {
     public class LemonAssemblyResolver : BaseAssemblyResolver, IComparer<Processor.TargetInfo>
     {
-        readonly Dictionary<string, AssemblyDefinition> _cache = new Dictionary<string, AssemblyDefinition>(StringComparer.Ordinal);
+        readonly Dictionary<string, AssemblyDefinition> _cache = new(StringComparer.Ordinal);
+
+        private Dictionary<string, Assembly> _currentAssemblies;
+
+        public void AddRead(AssemblyDefinition assembly)
+        {
+            var key = assembly.Name.Name;
+            _cache[key] = assembly;
+        }
 
         public override AssemblyDefinition Resolve(AssemblyNameReference name)
         {
-            if(_cache.TryGetValue(name.FullName, out var assembly))
+            var key = name.Name;
+            if (_cache.TryGetValue(key, out var assembly))
+            {
                 return assembly;
+            }
 
-            try
+            if (_currentAssemblies == null)
+            {
+                _currentAssemblies =
+                    AppDomain.CurrentDomain.GetAssemblies().ToDictionary(p => p.GetName().Name, p => p);
+            }
+            
+            if (_currentAssemblies.TryGetValue(key, out var asmAssembly))
+            {
+                assembly = AssemblyDefinition.ReadAssembly(
+                    asmAssembly.Location,
+                    new ReaderParameters(ReadingMode.Deferred)
+                    {
+                        AssemblyResolver = this,
+                        ReadWrite = false,
+                        InMemory = false,
+                        ReadSymbols = false,
+                        SymbolReaderProvider = null
+                    });
+
+                _cache[key] = assembly;
+                return assembly;
+            }
+            else
             {
                 assembly = base.Resolve(name, new ReaderParameters(ReadingMode.Deferred)
                 {
                     AssemblyResolver = this,
                     ReadWrite = false,
-                    InMemory = false
+                    InMemory = false,
+                    ReadSymbols = false,
+                    SymbolReaderProvider = null
                 });
-            }
-            catch (AssemblyResolutionException e)
-            {
-                var asm = AppDomain.CurrentDomain.GetAssemblies().First(p => p.GetName().Name == name.Name);
-                assembly = AssemblyDefinition.ReadAssembly(asm.Location,
-                    new ReaderParameters(ReadingMode.Deferred)
-                    {
-                        AssemblyResolver = this,
-                        ReadWrite = false,
-                        InMemory = false
-                    });
-            }
 
-            _cache[name.FullName] = assembly;
-            return assembly;
+                _cache[name.Name] = assembly;
+                return assembly;
+            }
         }
 
-        public void Release(string fullName)
+        public void Release(string shortName)
         {
-            if(_cache.TryGetValue(fullName, out var assembly))
+            if (_cache.TryGetValue(shortName, out var assembly))
             {
-                assembly.Dispose();
-                _cache.Remove(fullName);
+                //assembly.Dispose();
+                _cache.Remove(shortName);
             }
         }
 
         protected override void Dispose(bool disposing)
         {
-            foreach(var assembly in _cache.Values)
+            foreach (var assembly in _cache.Values)
                 assembly.Dispose();
 
             _cache.Clear();
@@ -59,23 +85,25 @@ namespace Lemon
 
         public int Compare(Processor.TargetInfo x, Processor.TargetInfo y)
         {
-            if(!_cache.ContainsKey(x.AssemblyName)) return -1;
-            if(!_cache.ContainsKey(y.AssemblyName)) return +1;
+            if (!_cache.ContainsKey(x.AssemblyName)) return -1;
+            if (!_cache.ContainsKey(y.AssemblyName)) return +1;
 
-            if(!x.OpenAssemblyDefinition.MainModule.HasAssemblyReferences) return -1;
-            if(!y.OpenAssemblyDefinition.MainModule.HasAssemblyReferences) return +1;
+            if (!x.OpenAssemblyDefinition.MainModule.HasAssemblyReferences) return -1;
+            if (!y.OpenAssemblyDefinition.MainModule.HasAssemblyReferences) return +1;
 
-            if(x.OpenAssemblyDefinition.MainModule.AssemblyReferences.Any(p => p.FullName == y.AssemblyName))
+            if (x.OpenAssemblyDefinition.MainModule.AssemblyReferences.Any(p => p.Name == y.AssemblyName))
             {
                 return +1;
             }
 
-            if(y.OpenAssemblyDefinition.MainModule.AssemblyReferences.Any(p => p.FullName == x.AssemblyName))
+            if (y.OpenAssemblyDefinition.MainModule.AssemblyReferences.Any(p => p.Name == x.AssemblyName))
             {
                 return -1;
             }
 
             return 0;
         }
+
+
     }
 }

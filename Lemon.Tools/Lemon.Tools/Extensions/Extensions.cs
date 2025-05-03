@@ -10,95 +10,13 @@ using Mono.Cecil.Rocks;
 using Mono.Collections.Generic;
 using ICustomAttributeProvider = Mono.Cecil.ICustomAttributeProvider;
 using MethodAttributes = Mono.Cecil.MethodAttributes;
+using TypeAttributes = Mono.Cecil.TypeAttributes;
 
 namespace Lemon.Tools
 {
     public static partial class Extensions
     {
         //Instructions 
-        public static TypeReference ImportType<T>(this ModuleDefinition module)
-        {
-            return module.ImportReference(typeof(T));
-        }
-
-        public static TypeReference ImportOpenGenericType<T>(this ModuleDefinition module)
-        {
-            var type = ImportType<T>(module) as GenericInstanceType;
-            if(type == null) throw new ArgumentException();
-            return type.ElementType;
-        }
-
-        public static MethodReference ImportOpenGenericMethod<T>(this ModuleDefinition module,
-            Expression<Action<T>> expression)
-        {
-            var method = ImportMethod(module, expression) as GenericInstanceMethod;
-            if(method == null) throw new ArgumentException();
-            return method.ElementMethod;
-        }
-
-        public static MethodReference ImportOpenGenericMethod<T>(this ModuleDefinition module,
-            Expression<Func<T, object>> expression)
-        {
-            var method = ImportMethod(module, expression) as GenericInstanceMethod;
-            if(method == null) throw new ArgumentException();
-            return method.ElementMethod;
-        }
-
-        public static MethodReference ImportMethod<T>(this ModuleDefinition module, Expression<Action<T>> expression)
-        {
-            return ImportMethodImpl(module, expression);
-        }
-
-        public static MethodReference ImportStaticMethod(this ModuleDefinition module,
-            Expression<Action> expression)
-        {
-            return ImportMethodImpl(module, expression);
-        }
-
-        private static MethodReference ImportMethodImpl(ModuleDefinition module, LambdaExpression expression)
-        {
-            var key = module.MetadataToken.GetHashCode() ^ expression.GetHashCode();
-            if(Cache.Instance.ImportMethodImpl.TryGetValue(key, out var  value))
-            {
-                return value;
-            }
-            
-            var body = expression.Body;
-            if(body is UnaryExpression uEx) body = uEx.Operand;
-
-            MethodReference method = null;
-            if(body is MethodCallExpression methodCall)
-            {
-                method = module.ImportReference(methodCall.Method);
-            }
-
-            if(body is MemberExpression member && member.Member is PropertyInfo prop)
-            {
-                method = module.ImportReference(prop.GetMethod);
-            }
-
-            if(method != null)
-            {
-                foreach(var parameter in method.Parameters)
-                {
-                    if(parameter.ParameterType.Scope.Name.StartsWith("System.Private.CoreLib") && !(parameter.ParameterType is TypeSpecification))
-                    {
-                        parameter.ParameterType.Scope = module.TypeSystem.CoreLibrary;
-                    }
-                }
-
-                Cache.Instance.ImportMethodImpl[key] = method;
-                return method;
-            }
-
-            throw new ArgumentException(nameof(expression));
-        }
-
-        public static MethodReference ImportMethod<T>(this ModuleDefinition module,
-            Expression<Func<T, object>> expression)
-        {
-            return ImportMethodImpl(module, expression);
-        }
 
         public static bool HasPublicSetter(this PropertyReference property)
         {
@@ -115,53 +33,10 @@ namespace Lemon.Tools
             return backingField;
         }
 
-        public static MethodReference MakeGenericMethod(this MethodReference self, params TypeReference[] arguments)
-        {
-            if(self is GenericInstanceMethod closedInstance)
-            {
-                self = closedInstance.ElementMethod;
-            }
-
-            if(self.HasGenericParameters)
-            {
-                var genericInstance = new GenericInstanceMethod(self);
-                genericInstance.GenericArguments.AddRange(arguments);
-                return genericInstance;
-            }
-
-            var reference = new MethodReference(self.Name, self.ReturnType)
-            {
-                DeclaringType = self.DeclaringType.MakeGenericType(arguments),
-                HasThis = self.HasThis,
-                ExplicitThis = self.ExplicitThis,
-                CallingConvention = self.CallingConvention
-            };
-
-            foreach(var parameter in self.Parameters)
-                reference.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
-
-            foreach(var genericParameter in self.GenericParameters)
-                reference.GenericParameters.Add(new GenericParameter(genericParameter.Name, reference));
-
-            return reference;
-        }
-
-        public static TypeReference MakeGenericType(this TypeReference self, params TypeReference[] arguments)
-        {
-            if(self.GenericParameters.Count != arguments.Length)
-            {
-                throw new ArgumentException();
-            }
-
-            var instance = new GenericInstanceType(self);
-            instance.GenericArguments.AddRange(arguments);
-            return instance;
-        }
-
         public static MethodDefinition GetOrCreateStaticConstructor(this TypeDefinition type)
         {
             var staticCtor = type.GetStaticConstructor();
-            if(staticCtor == null)
+            if (staticCtor == null)
             {
                 staticCtor = new MethodDefinition(
                     ".cctor",
@@ -182,80 +57,135 @@ namespace Lemon.Tools
             TypeReference returnType,
             MethodAttributes attributes)
         {
-            var module = type.Module;
+            //var module = type.Module;
             var method = new MethodDefinition(name, attributes, returnType);
 
-            if(type is TypeDefinition definition)
-            {
-                definition.Resolve().Methods.Add(method);
-            }
-            else
-            {
-                type.DeclaringType.Methods.Add(method);
-            }
+            type.Methods.Add(method);
+
+            // if (type is TypeDefinition definition)
+            // {
+            //     definition.Resolve().Methods.Add(method);
+            // }
+            // else
+            // {
+            //     type.DeclaringType.Methods.Add(method);
+            // }
 
             return method;
         }
-        
-        public static MethodDefinition CreateEmptyConstructor(this TypeDefinition type, string nativeCtorName)
+
+        public static TypeDefinition CreateType(this ModuleDefinition module, string @namespace, string name,
+            bool @static = false)
         {
-            var emptyCtor = type.GetConstructors().FirstOrDefault(p => p.Parameters.Count == 0 && p.HasAttribute<CompilerGeneratedAttribute>());
-            if(emptyCtor!=null) return emptyCtor;
-            
-            var nativeCtor = type.GetConstructors().FirstOrDefault(p => p.Parameters.Count == 0 && !p.HasAttribute<CompilerGeneratedAttribute>());
-            if(nativeCtor != null)
+            var newType = new TypeDefinition(@namespace, name, TypeAttributes.Class);
+            newType.BaseType = module.TypeSystem.Object;
+            newType.Attributes |= TypeAttributes.BeforeFieldInit;
+            module.Types.Add(newType);
+            if (!@static)
             {
-                nativeCtor.Name = nativeCtorName;
-                nativeCtor.Attributes = MethodAttributes.Public;
+                newType.CreateEmptyConstructor();
             }
 
-            var methodAttributes = MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.RTSpecialName;
+            return newType;
+        }
+
+        public static MethodDefinition CreateEmptyConstructor(this TypeDefinition type) //, string nativeCtorName)
+        {
+            var emptyCtor =
+                type.GetConstructors()
+                    .FirstOrDefault(p => p.Parameters.Count == 0); // && p.HasAttribute<CompilerGeneratedAttribute>());
+            if (emptyCtor != null)
+            {
+                emptyCtor.Attributes |= MethodAttributes.Public;
+                return emptyCtor;
+            }
+
+            // var nativeCtor = type.GetConstructors().FirstOrDefault(p => p.Parameters.Count == 0 && !p.HasAttribute<CompilerGeneratedAttribute>());
+            // if(nativeCtor != null)
+            // {
+            //     nativeCtor.Name = nativeCtorName;
+            //     nativeCtor.Attributes = MethodAttributes.Public;
+            // }
+
+            var methodAttributes = MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.SpecialName |
+                                   MethodAttributes.RTSpecialName;
             var newEmptyCtor = new MethodDefinition(".ctor", methodAttributes, type.Module.TypeSystem.Void);
             //method.Body.Instructions.Add(Instruction.Create(OpCodes.Ldarg_0));
             newEmptyCtor.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
             type.Methods.Add(newEmptyCtor);
             newEmptyCtor.AddAttribute<CompilerGeneratedAttribute>();
-            
+
             return newEmptyCtor;
         }
-        
+
         public static List<MethodDefinition> ImplementInterface<T>(this TypeDefinition type, bool explicitly)
         {
             var interfaceRef = type.Module.ImportType<T>();
             return ImplementInterface(type, interfaceRef, explicitly);
         }
 
-        public static List<MethodDefinition> ImplementInterface(this TypeDefinition type, TypeReference interfaceRef, bool explicitly)
+        public static List<MethodDefinition> ImplementInterface(this TypeDefinition type, TypeReference interfaceRef,
+            bool explicitly)
         {
             var result = new List<MethodDefinition>();
 
-            if(type.IsInterface)
+            if (type.IsInterface)
             {
                 throw new ArgumentException(type + " is an interface");
             }
 
-            if(type.Interfaces.Any(p => p.InterfaceType.FullName == interfaceRef.FullName)) return result;
+            if (type.Interfaces.Any(p => p.InterfaceType.FullName == interfaceRef.FullName)) return result;
 
             type.Interfaces.Add(new InterfaceImplementation(interfaceRef));
 
             var interfaceDef = interfaceRef.Resolve();
-            foreach(var method in interfaceDef.Methods.Select(p => type.Module.ImportReference(p)))
+            var methods = interfaceDef.Methods;
+            foreach (MethodDefinition origMethod in methods)
             {
-                var name = method.Name;
-                if(explicitly) name = interfaceRef.FullName + "." + name;
+                var name = origMethod.Name;
+                if (explicitly) name = interfaceRef.FullName + "." + name;
 
-                var alreadyImplemented = type.Methods.FirstOrDefault(p => p.SameSignature(method) && p.Name == name);
-                if(alreadyImplemented != null)
+                var alreadyImplemented =
+                    type.Methods.FirstOrDefault(p => p.IsSameSignature(origMethod) && p.Name == name);
+                if (alreadyImplemented != null)
                 {
                     result.Add(alreadyImplemented);
                     continue;
                 }
 
-                var typeMethod = type.CreateMethod(name, method.ReturnType, method.Resolve().Attributes);
-                typeMethod.IsAbstract = false;
-                typeMethod.Parameters.AddRange(method.Parameters);
+                var method = type.Module.ImportReference(origMethod);
 
-                if(explicitly) typeMethod.Overrides.Add(method);
+                var attrs = method.Resolve().Attributes;
+
+                attrs &= ~MethodAttributes.Abstract;
+                attrs |= MethodAttributes.Final;
+
+                var typeMethod = type.CreateMethod(name, method.ReturnType, attrs);
+                typeMethod.IsAbstract = false;
+
+                for (int i = 0; i < method.Parameters.Count; i++)
+                {
+                    method.Parameters[i].Name = origMethod.Parameters[i].Name;
+                }
+                
+                foreach (var parameter in method.Parameters)
+                {
+                    if (parameter.ParameterType.Module != type.Module)
+                    {
+                        var importedType = type.Module.ImportReference(parameter.ParameterType);
+                        importedType = importedType.ResolveGenericType((GenericInstanceType)interfaceRef);
+                        var newparameter = new ParameterDefinition(parameter.Name, parameter.Attributes, importedType);
+                        typeMethod.Parameters.Add(newparameter);
+                    }
+                    else
+                    {
+                        parameter.ParameterType =
+                            parameter.ParameterType.ResolveGenericType((GenericInstanceType)interfaceRef);
+                        typeMethod.Parameters.Add(parameter);
+                    }
+                }
+
+                if (explicitly) typeMethod.Overrides.Add(method);
 
                 result.Add(typeMethod);
             }
@@ -266,12 +196,13 @@ namespace Lemon.Tools
         public static MethodDefinition GetMethod<T>(this TypeDefinition type, Expression<Action<T>> expression)
         {
             var refMethod = type.Module.ImportMethod(expression);
-            if(refMethod.DeclaringType.FullName != type.FullName)
+            if (refMethod.DeclaringType.FullName != type.FullName)
             {
-                var overriden = type.Methods.FirstOrDefault(p => p.Overrides.Any(x => x.FullName == refMethod.FullName));
+                var overriden =
+                    type.Methods.FirstOrDefault(p => p.Overrides.Any(x => x.FullName == refMethod.FullName));
                 if (overriden == null && type.Implements(refMethod.DeclaringType.FullName))
                 {
-                    overriden = type.Methods.FirstOrDefault(p => refMethod.SameSignature(p));
+                    overriden = type.Methods.FirstOrDefault(p => refMethod.IsSameSignature(p));
                 }
 
                 return overriden;
@@ -280,95 +211,143 @@ namespace Lemon.Tools
             return refMethod.Resolve();
         }
 
+        public static FieldReference GetResolvedField(this GenericInstanceType generic, string name)
+        {
+            var open = generic.ElementType.Resolve();
+            var fld = open.Fields.First(p => p.Name == name);
+            var fldType = ResolveGenericType(fld.FieldType, generic);
+
+            var fieldReference = new FieldReference(fld.Name, fldType, generic);
+            return fieldReference;
+        }
+
+        public static TypeReference ResolveGenericType(this TypeReference typeRef, GenericInstanceType generic)
+        {
+            if (typeRef is GenericParameter genericParameter)
+            {
+                var index = generic.GenericParameters.IndexOf(genericParameter);
+                typeRef = generic.GenericArguments[index];
+            }
+            else if (typeRef is GenericInstanceType genericInst)
+            {
+                var open = generic.Module.ImportReference(genericInst.ElementType);
+                var newGeneric = new GenericInstanceType(open);
+
+                for (int i = 0; i < genericInst.GenericArguments.Count; i++)
+                {
+                    if (genericInst.GenericArguments[i] is GenericParameter gp)
+                    {
+                        for (int j = 0; j < generic.ElementType.GenericParameters.Count; j++)
+                        {
+                            var param = generic.ElementType.GenericParameters[j];
+                            if (param.Name == gp.Name)
+                            {
+                                newGeneric.GenericArguments.Add(param);
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        newGeneric.GenericArguments.Add(genericInst.GenericArguments[i]);
+                    }
+                }
+
+                typeRef = newGeneric;
+            }
+            else if (typeRef is ByReferenceType byReferenceType)
+            {
+                if (byReferenceType.ElementType is GenericParameter gp)
+                {
+                    for (int j = 0; j < generic.ElementType.GenericParameters.Count; j++)
+                    {
+                        var param = generic.ElementType.GenericParameters[j];
+                        if (param.Name == gp.Name)
+                        {
+                            var solved = generic.GenericArguments[j];
+                            byReferenceType = new ByReferenceType(solved);
+                            typeRef = byReferenceType;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (typeRef.Module != generic.Module)
+            {
+                typeRef = generic.Module.ImportReference(typeRef, generic);
+            }
+
+            return typeRef;
+        }
+
+        public static MethodReference GetResolvedMethod(this GenericInstanceType generic, string name)
+        {
+            var genericInstance = (GenericInstanceType)generic;
+            var desOpen = genericInstance.ElementType.Resolve().Methods.First(m => m.Name == name);
+
+            var desClose = new MethodReference(desOpen.Name, ResolveGenericType(desOpen.ReturnType, generic), generic)
+            {
+                HasThis = desOpen.HasThis,
+                ExplicitThis = desOpen.ExplicitThis,
+                CallingConvention = desOpen.CallingConvention
+            };
+
+            foreach (var parameter in desOpen.Parameters)
+            {
+                var origType = parameter.ParameterType;
+                //var ptype = ResolveGenericType(origType, generic);
+                var ptype = origType;
+                if (ptype.Module != generic.Module)
+                {
+                    if (ptype is ByReferenceType byReferenceType)
+                    {
+                        var elType = generic.Module.ImportReference(byReferenceType.ElementType, generic);
+                        ptype = new ByReferenceType(elType);
+                    }
+                    else
+                    {
+                        ptype = generic.Module.ImportReference(ptype, generic);
+                    }
+                        
+                }
+                var pd = new ParameterDefinition(ptype);
+                pd.Name = parameter.Name;
+                pd.Attributes = parameter.Attributes;
+                desClose.Parameters.Add(pd);
+            }
+
+            return desClose;
+        }
+
+        public static MethodReference ResolveMethod(this GenericInstanceType generic, MethodReference open)
+        {
+            var genericInstance = (GenericInstanceType)generic;
+
+            var desClose = new MethodReference(open.Name, ResolveGenericType(open.ReturnType, generic), generic)
+            {
+                HasThis = open.HasThis,
+                ExplicitThis = open.ExplicitThis,
+                CallingConvention = open.CallingConvention
+            };
+
+            foreach (var parameter in open.Parameters)
+            {
+                desClose.Parameters.Add(new ParameterDefinition(ResolveGenericType(parameter.ParameterType, generic)));
+            }
+
+            return desClose;
+        }
+
         public static bool IsCompilerGenerated(this ICustomAttributeProvider provider)
         {
-            if(provider.HasCustomAttributes)
+            if (provider.HasCustomAttributes)
             {
                 return provider.CustomAttributes.Any(a =>
-                                                         a.AttributeType.FullName == "System.Runtime.CompilerServices.CompilerGeneratedAttribute");
+                    a.AttributeType.FullName == "System.Runtime.CompilerServices.CompilerGeneratedAttribute");
             }
 
             return false;
-        }
-
-        //===================
-        public static Emitter AppendIL(this MethodDefinition method)
-        {
-            return new Emitter(method);
-        }
-
-        public static Emitter InsertILBefore(this MethodDefinition method,
-            Func<Collection<Instruction>, Instruction> instructionSelector)
-        {
-            return InsertILBefore(method, instructionSelector(method.Body.Instructions));
-        }
-
-        public static Emitter InsertILAfter(this MethodDefinition method,
-            Func<Collection<Instruction>, Instruction> instructionSelector)
-        {
-            return InsertILAfter(method, instructionSelector(method.Body.Instructions));
-        }
-
-        public static Emitter InsertILAfter(this MethodDefinition method, Instruction instruction)
-        {
-            return new Emitter(method, AppendMode.Insert, instruction);
-        }
-
-        public static Emitter InsertILBefore(this MethodDefinition method, Instruction instruction)
-        {
-            return new Emitter(method, AppendMode.Insert, instruction.Previous);
-        }
-
-        public static Emitter InsertILTail(this MethodDefinition method)
-        {
-            return InsertILBefore(method, method.LastRet());
-        }
-
-        public static Emitter InsertILHead(this MethodDefinition method)
-        {
-            if(method.Body == null || method.Body.Instructions.Count == 0)
-            {
-                return AppendIL(method);
-            }
-
-            return InsertILBefore(method, p => p[0]);
-        }
-
-        public static MethodDefinition AddLocalVariable(this MethodDefinition method,
-            Type varType, string name,
-            out VariableDefinition variableDefinition)
-        {
-            var type = method.Module.ImportReference(varType);
-            return method.AddLocalVariable(type, name, out variableDefinition);
-        }
-
-        public static MethodDefinition AddLocalVariable(this MethodDefinition method,
-            TypeReference varType, string name,
-            out VariableDefinition variableDefinition)
-        {
-            var var = new VariableDefinition(varType);
-
-            AddLocalVariable(method, name, var);
-
-            variableDefinition = var;
-            return method;
-        }
-
-        public static MethodDefinition AddLocalVariable<T>(this MethodDefinition method, string name,
-            out VariableDefinition variableDefinition)
-        {
-            return AddLocalVariable(method, typeof(T), name, out variableDefinition);
-        }
-
-        public static MethodDefinition AddLocalVariable(this MethodDefinition method, string name, VariableDefinition var)
-        {
-            method.Body.Variables.Add(var);
-            if(!string.IsNullOrEmpty(name))
-            {
-                method.DebugInformation.Scope?.Variables.Add(new VariableDebugInformation(var, name));
-            }
-
-            return method;
         }
     }
 }

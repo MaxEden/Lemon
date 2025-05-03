@@ -4,17 +4,17 @@ using System.Linq;
 
 namespace Lemon.Tools
 {
-    public static partial class Extensions
+    public static class CollectionHelpers
     {
-        public static void AddRange<T>(this ICollection<T> collection, IEnumerable<T> source)
+        internal static void AddRange<T>(this ICollection<T> collection, IEnumerable<T> source)
         {
             foreach(var item in source)
             {
                 collection.Add(item);
             }
         }
-        
-        public static TValue GetOrCreate<TKey, TValue>(this IDictionary<TKey, TValue> dict,
+
+        internal static TValue GetOrCreate<TKey, TValue>(this IDictionary<TKey, TValue> dict,
                                                        TKey                           key) where TValue : new()
         {
             if(!dict.TryGetValue(key, out var result))
@@ -26,7 +26,7 @@ namespace Lemon.Tools
             return result;
         }
 
-        public static TValue GetOrCreate<TKey, TValue>(this IDictionary<TKey, TValue> dict,
+        internal static TValue GetOrCreate<TKey, TValue>(this IDictionary<TKey, TValue> dict,
                                                        TKey                           key,
                                                        Func<TKey, TValue>             ctor)
         {
@@ -39,19 +39,19 @@ namespace Lemon.Tools
             return result;
         }
 
-        public static void AddWithException<TKey, TValue>(this IDictionary<TKey, TValue> dict,
+        internal static void AddWithException<TKey, TValue>(this IDictionary<TKey, TValue> dict,
                                                           TKey                           key,
                                                           TValue                         value)
         {
-            if(dict.ContainsKey(key))
+            if(dict.TryGetValue(key, out var oldValue))
             {
-                throw new ArgumentException($"Key:{key} already exists in {dict}. old:{dict[key]}. new:{value}");
+                throw new ArgumentException($"Key:{key} already exists in {dict}. old:{oldValue}. new:{value}");
             }
 
             dict.Add(key, value);
         }
 
-        public static void RemoveAll<TKey, TValue>(this IDictionary<TKey, TValue> source, Predicate<TValue> predicate)
+        internal static void RemoveAll<TKey, TValue>(this IDictionary<TKey, TValue> source, Predicate<TValue> predicate)
         {
             foreach(var pair in source.ToList())
             {

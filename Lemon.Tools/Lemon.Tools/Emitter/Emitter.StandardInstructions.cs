@@ -165,12 +165,17 @@ namespace Lemon.Tools
 
         public Emitter LdArg(params string[] names)
         {
-            var indexes = Parameters
-                .Where(p => names.Contains(p.Name))
-                .Select(p => (uint)p.Index)
-                .ToArray();
+            foreach (var name in names)
+            {
+                var param = Parameters.FirstOrDefault(v => v.Name == name);
+                if (param == null)
+                {
+                    throw new ArgumentException("parameter must be declared in method definition before using it");
+                }
 
-            return LdArg(indexes);
+                Emit(OpCodes.Ldarg, param);
+            }
+            return this;
         }
 
         public Emitter LdArg(params uint[] indexes)

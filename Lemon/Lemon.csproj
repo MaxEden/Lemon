@@ -6,7 +6,6 @@
 		<BaseOutputPath></BaseOutputPath>
 		<BaseIntermediateOutputPath />
 	</PropertyGroup>
-
 	<ItemGroup>
 		<ProjectReference Include="..\Lemon.Tools\Lemon.Tools.csproj" />
 	</ItemGroup>

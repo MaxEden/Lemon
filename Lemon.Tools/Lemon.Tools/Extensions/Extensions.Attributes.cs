@@ -75,6 +75,12 @@ namespace Lemon.Tools
             if(provider is MemberReference memberReference)
             {
                 AddAttribute<T>(provider, memberReference.Module, args);
+                return;
+            }
+            else if (provider is AssemblyDefinition asmReference)
+            {
+                AddAttribute<T>(provider, asmReference.MainModule, args);
+                return;
             }
             else
             {
@@ -97,7 +103,7 @@ namespace Lemon.Tools
                                              || info.ParameterType == typeof(Type) && args[i] is TypeReference)
                         .All(x => x)));
 
-            if(constructor == null) throw new ArgumentException();
+            if(constructor == null) throw new ArgumentException("Can't find ctor for such parameters");
 
             var constructorRef = module.ImportReference(constructor);
             var attribute = new CustomAttribute(constructorRef);

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Xml.Linq;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -85,15 +86,26 @@ namespace Lemon.Tools
 
             return paramType;
         }
-
-        public static bool SameSignature(this MethodReference method, MethodReference other)
+        public static bool IsSameSignature(this MethodReference method, MethodReference other)
         {
-            if (!method.ReturnType.SameName(other.ReturnType)) return false;
+            if (!method.ReturnType.IsSameName(other.ReturnType)) return false;
             if (method.Parameters.Count != other.Parameters.Count) return false;
 
             for (int i = 0; i < method.Parameters.Count; i++)
             {
-                if (!method.Parameters[i].ParameterType.SameName(other.Parameters[i].ParameterType)) return false;
+                if (!method.Parameters[i].ParameterType.IsSameName(other.Parameters[i].ParameterType)) return false;
+            }
+
+            return true;
+        }
+
+        public static bool IsSameParameters(this MethodReference method, params TypeReference[] paramTypes)
+        {
+            if (method.Parameters.Count != paramTypes.Length) return false;
+
+            for (int i = 0; i < method.Parameters.Count; i++)
+            {
+                if (!method.Parameters[i].ParameterType.IsSameName(paramTypes[i])) return false;
             }
 
             return true;
@@ -102,13 +114,13 @@ namespace Lemon.Tools
         public static bool SameSignatureAsStatic(this MethodReference method, MethodReference staticMethod)
         {
             if (staticMethod.HasThis) throw new ArgumentException(staticMethod + "is not static");
-            if (!method.ReturnType.SameName(staticMethod.ReturnType)) return false;
+            if (!method.ReturnType.IsSameName(staticMethod.ReturnType)) return false;
             if (method.Parameters.Count + 1 != staticMethod.Parameters.Count) return false;
             if (!method.DeclaringType.Resolve().Is(staticMethod.Parameters[0].ParameterType)) return false;
 
             for (int i = 0; i < method.Parameters.Count; i++)
             {
-                if (!method.Parameters[i].ParameterType.SameName(staticMethod.Parameters[i + 1].ParameterType))
+                if (!method.Parameters[i].ParameterType.IsSameName(staticMethod.Parameters[i + 1].ParameterType))
                     return false;
             }
 
@@ -184,7 +196,6 @@ namespace Lemon.Tools
                 return instance;
             }
         }
-
         public static Instruction LastRet(this MethodDefinition self)
         {
             if (self.Body.Instructions.Count == 0)
