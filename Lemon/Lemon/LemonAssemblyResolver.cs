@@ -2,12 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Xml.Linq;
 using Mono.Cecil;
 
 namespace Lemon
 {
-    public class LemonAssemblyResolver : BaseAssemblyResolver, IComparer<Processor.TargetInfo>
+    public class LemonAssemblyResolver : BaseAssemblyResolver, IComparer<TargetDllInfo>
     {
         readonly Dictionary<string, AssemblyDefinition> _cache = new(StringComparer.Ordinal);
 
@@ -83,7 +82,7 @@ namespace Lemon
             base.Dispose(disposing);
         }
 
-        public int Compare(Processor.TargetInfo x, Processor.TargetInfo y)
+        public int Compare(TargetDllInfo x, TargetDllInfo y)
         {
             if (!_cache.ContainsKey(x.AssemblyName)) return -1;
             if (!_cache.ContainsKey(y.AssemblyName)) return +1;

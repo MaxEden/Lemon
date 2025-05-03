@@ -14,7 +14,7 @@ namespace Lemon
             files = new List<FileInfo>();
             foreach(var arg in dirPaths)
             {
-                if(!Directory.Exists(arg)) continue;
+                if(!Directory.Exists(arg)) throw new ArgumentException($"Directory {arg} not found");
                 var dir = new DirectoryInfo(arg);
                 var dlls = dir.GetFiles("*.dll", SearchOption.AllDirectories).ToList();
                 var exes = dir.GetFiles("*.exe", SearchOption.AllDirectories).ToList();
@@ -52,26 +52,7 @@ namespace Lemon
 
             return false;
         }
-
-        public static bool ReadAndCheck(FileInfo fileInfo, Func<AssemblyDefinition, bool> check)
-        {
-            try
-            {
-                using var assembly = AssemblyDefinition.ReadAssembly(
-                    fileInfo.FullName, new ReaderParameters
-                                       {
-                                           ReadSymbols = false,
-                                           ReadingMode = ReadingMode.Deferred,
-                                           ReadWrite = false,
-                                           InMemory = false,
-                                       });
-                return check(assembly);
-            }
-            catch(BadImageFormatException)
-            {
-                return false;
-            }
-        }
+        
     }
 
     public enum SymbolType

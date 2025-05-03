@@ -10,74 +10,29 @@ using Lemon.Tools.Weavers;
 using Mono.Cecil;
 using Mono.Cecil.Mdb;
 using Mono.Cecil.Pdb;
-using TypeAttributes = Mono.Cecil.TypeAttributes;
 
 namespace Lemon
 {
     public class Processor : IDisposable
     {
         private readonly Action<string> _log;
-        private readonly HashSet<string> _searchDirectories = new HashSet<string>();
-        private readonly HashSet<FileInfo> _dlls = new HashSet<FileInfo>();
-        private readonly Dictionary<string, TargetInfo> _targetInfos = new Dictionary<string, TargetInfo>();
-
+        private readonly HashSet<string> _searchDirectories = new();
+        private readonly Dictionary<string, TargetDllInfo> _targetInfos = new();
         private LemonAssemblyResolver _resolver;
-
-        // static Processor()
-        // {
-        //     AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolve;
-        // }
-
-        public bool AutoBackupAndRestore { get; set; }
-        public bool ReadDebugSymbols { get; set; } = true;
-
-        private static Assembly CurrentDomainAssemblyResolve(object sender, ResolveEventArgs args)
-        {
-            var domain = (AppDomain)sender;
-            foreach (var assembly in domain.GetAssemblies())
-            {
-                if (assembly.FullName == args.Name)
-                {
-                    return assembly;
-                }
-            }
-
-            return null;
-        }
-
+        public LemonAssemblyResolver Resolver => _resolver;
+        public bool ProcessDebugSymbols { get; set; } = true;
         public Processor(Action<string> log)
         {
             _log = log;
         }
-
-        private void PrepareResolver()
+        public void AddLookUpDirectories(params string[] directories)
         {
-            if (_resolver != null)
+            Searcher.SearchDlls(out var dlls, out var dllDirs, directories);
+            foreach (var dir in dllDirs)
             {
-                _resolver.Dispose();
-                _resolver = null;
-            }
-
-            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolve;
-
-            _resolver = new LemonAssemblyResolver();
-            _resolver.AddSearchDirectory(Path.GetDirectoryName(typeof(object).Assembly.Location));
-            foreach (var info in _searchDirectories)
-            {
-                _resolver.AddSearchDirectory(info);
-            }
-
-            foreach (var target in _targetInfos.Values)
-            {
-                target.ReaderParameters.AssemblyResolver = _resolver;
+                _searchDirectories.Add(dir.FullName);
             }
         }
-
-        public void AddTargetAssemblies(IList<string> filePaths)
-        {
-            AddTargetAssemblies(filePaths.Select(p => new FileInfo(p)).ToArray());
-        }
-
         public void AddTargetAssemblies(params FileInfo[] files)
         {
             foreach (var file in files)
@@ -91,7 +46,7 @@ namespace Lemon
 
                 string symbolPath = null;
 
-                if (ReadDebugSymbols)
+                if (ProcessDebugSymbols)
                 {
                     if (Searcher.SearchDebugSymbols(file, out var symbolType, out symbolPath))
                     {
@@ -123,7 +78,7 @@ namespace Lemon
                 readerParameters.ReadingMode = ReadingMode.Immediate;
                 readerParameters.ReadWrite = false;
 
-                targetInfo = new TargetInfo()
+                targetInfo = new TargetDllInfo()
                 {
                     FileInfo = file,
                     SymbolPath = symbolPath,
@@ -135,29 +90,28 @@ namespace Lemon
             }
         }
 
-        public void RestoreDlls()
+        public void Process(Action<WeavingContext> weaveAction, string name = null)
         {
-            Backuper.RestoreDlls(_targetInfos.Values);
-        }
-
-        public void FreeAssembliesAndDispose()
-        {
-            var targets = _targetInfos.Values.ToList();
-            targets.Sort(_resolver);
-
-            foreach (var target in targets)
+            _log("===WEAVING===");
+            var assemblies = Read();
+            try
             {
-                _resolver.Release(target.AssemblyName);
+                name ??= weaveAction.Method.DeclaringType.Name + "." + weaveAction.Method.Name;
+                _log($"Weaving with {name}");
+                weaveAction(new WeavingContext()
+                {
+                    assemblies = assemblies,
+                    log = _log,
+                    name = name
+                });
             }
-
-            foreach (var target in targets)
+            catch (Exception exception)
             {
-                target.OpenAssemblyDefinition.Dispose();
+                _log("EXCEPTION " + exception);
+                FreeAssembliesAndDispose();
+                throw;
             }
-
-            Dispose();
         }
-
         public void WriteAssembliesAndDispose()
         {
             var targets = _targetInfos.Values.ToList();
@@ -167,7 +121,7 @@ namespace Lemon
             {
                 //target.ReaderParameters = null;
 
-                Conventions.AddStamp(target.OpenAssemblyDefinition);
+                Stamps.AddStamp(target.OpenAssemblyDefinition);
 
                 _log($"Writing dll to {target.AssemblyPath}");
 
@@ -186,28 +140,51 @@ namespace Lemon
 
             Dispose();
         }
+        public void FreeAssembliesAndDispose()
+        {
+            var targets = _targetInfos.Values.ToList();
+            targets.Sort(_resolver);
 
-        public void Dispose()
+            foreach (var target in targets)
+            {
+                _resolver.Release(target.AssemblyName);
+            }
+
+            foreach (var target in targets)
+            {
+                target.OpenAssemblyDefinition.Dispose();
+            }
+
+            Dispose();
+        }
+        //==========
+
+        private void PrepareResolver()
         {
             if (_resolver != null)
             {
-                AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomainAssemblyResolve;
-
                 _resolver.Dispose();
                 _resolver = null;
-                Cache.Instance.Clear();
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
+            }
+
+            AppDomain.CurrentDomain.AssemblyResolve += CurrentDomainAssemblyResolve;
+
+            _resolver = new LemonAssemblyResolver();
+            _resolver.AddSearchDirectory(Path.GetDirectoryName(typeof(object).Assembly.Location));
+            foreach (var info in _searchDirectories)
+            {
+                _resolver.AddSearchDirectory(info);
+            }
+
+            foreach (var target in _targetInfos.Values)
+            {
+                target.ReaderParameters.AssemblyResolver = _resolver;
             }
         }
-
-        public LemonAssemblyResolver Resolver => _resolver;
-
         private List<AssemblyDefinition> Read()
         {
             Cache.Instance.Clear();
             PrepareResolver();
-            if (AutoBackupAndRestore) RestoreDlls();
 
             _log("reading...");
             foreach (var pair in _targetInfos.ToArray())
@@ -215,16 +192,11 @@ namespace Lemon
                 var target = pair.Value;
 
                 _log(target.AssemblyPath);
-                // if (!AutoBackupAndRestore && Conventions.IsStampedDll(target.FileInfo))
-                // {
-                //     _log("Already weaved: " + target.Name);
-                //     continue;
-                // }
 
                 try
                 {
 
-                    if (!ReadDebugSymbols)
+                    if (!ProcessDebugSymbols)
                     {
                         target.ReaderParameters.ReadSymbols = false;
                         target.WriterParameters.WriteSymbols = false;
@@ -239,7 +211,7 @@ namespace Lemon
                         continue;
                     }
 
-                    if (assembly.MainModule.GetType("Weaver", "Stamp") != null)
+                    if (assembly.MainModule.GetType(Stamps.Namespace, Stamps.Name) != null)
                     {
                         _log("Already weaved: " + target.Name);
                         assembly.Dispose();
@@ -264,54 +236,50 @@ namespace Lemon
             return values;
         }
 
-        public void Process(Action<List<AssemblyDefinition>, Action<string>> weaveAction, string name = null)
+        private static Assembly CurrentDomainAssemblyResolve(object sender, ResolveEventArgs args)
         {
-            _log("===WEAVING===");
-
-            var values = Read();
-            try
+            var domain = (AppDomain)sender;
+            foreach (var assembly in domain.GetAssemblies())
             {
-                name ??= weaveAction.Method.DeclaringType.Name + "." + weaveAction.Method.Name;
-                _log($"Weaving with {name}");
-                weaveAction(values, _log);
-            }
-            catch (Exception exception)
-            {
-                _log("EXCEPTION " + exception);
-                Dispose();
-                throw;
-            }
-        }
-
-        public class TargetInfo
-        {
-            public FileInfo FileInfo;
-            public string AssemblyPath => FileInfo.FullName;
-            public string Name => FileInfo.Name;
-            public string AssemblyName { get; internal set; }
-            public string AssemblyFullName { get; internal set; }
-
-            public string SymbolPath;
-            public ReaderParameters ReaderParameters;
-            public WriterParameters WriterParameters;
-
-            public AssemblyDefinition OpenAssemblyDefinition;
-        }
-
-        public void AddLookUpDirectories(params string[] directories)
-        {
-            Searcher.SearchDlls(out var dlls, out var dllDirs, directories);
-            foreach (var dir in dllDirs)
-            {
-                _searchDirectories.Add(dir.FullName);
+                if (assembly.FullName == args.Name)
+                {
+                    return assembly;
+                }
             }
 
-            _dlls.AddRange(dlls);
+            return null;
         }
-
-        public void SearchTargets(Func<FileInfo, bool> isTarget)
+        void IDisposable.Dispose()
         {
-            AddTargetAssemblies(_dlls.Where(isTarget).ToArray());
+            this.Dispose();
         }
+        private void Dispose()
+        {
+            if (_resolver != null)
+            {
+                AppDomain.CurrentDomain.AssemblyResolve -= CurrentDomainAssemblyResolve;
+
+                _resolver.Dispose();
+                _resolver = null;
+                Cache.Instance.Clear();
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+        }
+    }
+
+    public class TargetDllInfo
+    {
+        public FileInfo FileInfo;
+        public string AssemblyPath => FileInfo.FullName;
+        public string Name => FileInfo.Name;
+        public string AssemblyName { get; internal set; }
+        public string AssemblyFullName { get; internal set; }
+
+        public string SymbolPath;
+        public ReaderParameters ReaderParameters;
+        public WriterParameters WriterParameters;
+
+        public AssemblyDefinition OpenAssemblyDefinition;
     }
 }

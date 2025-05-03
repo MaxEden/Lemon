@@ -74,19 +74,13 @@ namespace Lemon.Tools
             return method;
         }
 
-        public static TypeDefinition CreateType(this ModuleDefinition module, string @namespace, string name,
-            bool @static = false)
+        public static TypeDefinition CreateType(this ModuleDefinition module, string @namespace, string name)
         {
             var newType = new TypeDefinition(@namespace, name, TypeAttributes.Class);
             newType.BaseType = module.TypeSystem.Object;
             newType.Attributes |= TypeAttributes.BeforeFieldInit;
             module.Types.Add(newType);
-            if (!@static)
-            {
-                newType.CreateEmptyConstructor();
-            }
-
-            return newType;
+           return newType;
         }
 
         public static MethodDefinition CreateEmptyConstructor(this TypeDefinition type) //, string nativeCtorName)
