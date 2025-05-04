@@ -28,8 +28,8 @@ namespace Lemon
 
             if (_currentAssemblies == null)
             {
-                _currentAssemblies =
-                    AppDomain.CurrentDomain.GetAssemblies().ToDictionary(p => p.GetName().Name, p => p);
+                var currentAssemblies = AppDomain.CurrentDomain.GetAssemblies();
+                _currentAssemblies = currentAssemblies.ToDictionary(p => p.GetName().Name, p => p);
             }
             
             if (_currentAssemblies.TryGetValue(key, out var asmAssembly))

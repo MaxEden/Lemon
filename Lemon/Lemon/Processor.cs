@@ -17,7 +17,7 @@ namespace Lemon
     {
         private readonly Action<string> _log;
         private readonly HashSet<string> _searchDirectories = new();
-        private readonly Dictionary<string, TargetDllInfo> _targetInfos = new();
+        private readonly List<TargetDllInfo> _targetInfos = new();
         private LemonAssemblyResolver _resolver;
         public LemonAssemblyResolver Resolver => _resolver;
         public bool ProcessDebugSymbols { get; set; } = true;
@@ -33,11 +33,69 @@ namespace Lemon
                 _searchDirectories.Add(dir.FullName);
             }
         }
+
+        public void AddTargetStreams(params StreamInfo[] streams)
+        {
+            foreach (var stream in streams)
+            {
+                if (_targetInfos.Any(p => p.Name == stream.Name)) continue;
+
+                var readerParameters = new ReaderParameters();
+                var writerParameters = new WriterParameters();
+
+                readerParameters.AssemblyResolver = _resolver;
+                
+                if (ProcessDebugSymbols)
+                {
+                    if (stream.SymbolStream!=null)
+                    {
+                        if (stream.SymbolType == SymbolType.Mdb)
+                        {
+                            readerParameters.SymbolReaderProvider = new MdbReaderProvider();
+                            writerParameters.SymbolWriterProvider = new MdbWriterProvider();
+                        }
+
+                        if (stream.SymbolType == SymbolType.Pdb)
+                        {
+                            readerParameters.SymbolReaderProvider = new PdbReaderProvider();
+                            writerParameters.SymbolWriterProvider = new PdbWriterProvider();
+                        }
+
+                        readerParameters.ReadSymbols = true;
+                        writerParameters.WriteSymbols = true;
+
+                        readerParameters.SymbolStream = stream.SymbolStream;
+                        writerParameters.SymbolStream = stream.SymbolStream;
+                    }
+                }
+                else
+                {
+                    readerParameters.ReadSymbols = false;
+                    writerParameters.WriteSymbols = false;
+                    readerParameters.SymbolReaderProvider = null;
+                    writerParameters.SymbolWriterProvider = null;
+                }
+
+                readerParameters.InMemory = true;
+                readerParameters.ReadingMode = ReadingMode.Immediate;
+                readerParameters.ReadWrite = false;
+
+                var targetInfo = new TargetDllInfo()
+                {
+                    StreamInfo = stream,
+                    WriterParameters = writerParameters,
+                    ReaderParameters = readerParameters
+                };
+
+                _targetInfos.Add(targetInfo);
+            }
+        }
+
         public void AddTargetAssemblies(params FileInfo[] files)
         {
             foreach (var file in files)
             {
-                if (_targetInfos.TryGetValue(file.FullName, out var targetInfo)) continue;
+                if (_targetInfos.Any(p=>p.AssemblyPath == file.FullName)) continue;
 
                 var readerParameters = new ReaderParameters();
                 var writerParameters = new WriterParameters();
@@ -78,7 +136,7 @@ namespace Lemon
                 readerParameters.ReadingMode = ReadingMode.Immediate;
                 readerParameters.ReadWrite = false;
 
-                targetInfo = new TargetDllInfo()
+                var targetInfo = new TargetDllInfo()
                 {
                     FileInfo = file,
                     SymbolPath = symbolPath,
@@ -86,14 +144,14 @@ namespace Lemon
                     ReaderParameters = readerParameters
                 };
 
-                _targetInfos.Add(file.FullName, targetInfo);
+                _targetInfos.Add(targetInfo);
             }
         }
 
         public void Process(Action<WeavingContext> weaveAction, string name = null)
         {
             _log("===WEAVING===");
-            var assemblies = Read();
+            var assemblies = ReadAssemblies();
             try
             {
                 name ??= weaveAction.Method.DeclaringType.Name + "." + weaveAction.Method.Name;
@@ -114,7 +172,7 @@ namespace Lemon
         }
         public void WriteAssembliesAndDispose()
         {
-            var targets = _targetInfos.Values.ToList();
+            var targets = _targetInfos.ToList();
             targets.Sort(_resolver);
 
             foreach (var target in targets)
@@ -123,11 +181,34 @@ namespace Lemon
 
                 Stamps.AddStamp(target.OpenAssemblyDefinition);
 
-                _log($"Writing dll to {target.AssemblyPath}");
-
                 _resolver.Release(target.AssemblyName);
-                target.OpenAssemblyDefinition.Write(target.AssemblyPath, target.WriterParameters);
 
+                if (target.IsFile)
+                {
+                    _log($"Writing dll to {target.AssemblyPath}");
+                    target.OpenAssemblyDefinition.Write(target.AssemblyPath, target.WriterParameters);
+                }
+                else
+                {
+                    _log($"Writing dll to stream {target.Name}");
+
+                    target.StreamInfo.OutputMainStream ??= new();
+                    var mainStream = target.StreamInfo.OutputMainStream;
+                    mainStream.Position = 0;
+                    mainStream.SetLength(0);
+
+                    if (ProcessDebugSymbols && target.StreamInfo.SymbolStream!=null)
+                    {
+                        target.StreamInfo.OutputSymbolStream ??= new MemoryStream();
+                        var symbolStream = target.StreamInfo.OutputSymbolStream;
+                        symbolStream.Position = 0;
+                        symbolStream.SetLength(0);
+                        target.WriterParameters.SymbolStream = symbolStream;
+                    }
+
+                    target.OpenAssemblyDefinition.Write(mainStream, target.WriterParameters);
+                }
+                
                 //target.OpenAssemblyDefinition.Write(target.AssemblyPath, target.WriterParameters);
                 //target.OpenAssemblyDefinition.Dispose();
                 //TargetInfos.Remove(target.FileInfo.FullName);
@@ -142,7 +223,7 @@ namespace Lemon
         }
         public void FreeAssembliesAndDispose()
         {
-            var targets = _targetInfos.Values.ToList();
+            var targets = _targetInfos.ToList();
             targets.Sort(_resolver);
 
             foreach (var target in targets)
@@ -176,21 +257,19 @@ namespace Lemon
                 _resolver.AddSearchDirectory(info);
             }
 
-            foreach (var target in _targetInfos.Values)
+            foreach (var target in _targetInfos)
             {
                 target.ReaderParameters.AssemblyResolver = _resolver;
             }
         }
-        private List<AssemblyDefinition> Read()
+        private List<AssemblyDefinition> ReadAssemblies()
         {
             Cache.Instance.Clear();
             PrepareResolver();
 
             _log("reading...");
-            foreach (var pair in _targetInfos.ToArray())
+            foreach (var target in _targetInfos.ToArray())
             {
-                var target = pair.Value;
-
                 _log(target.AssemblyPath);
 
                 try
@@ -204,7 +283,29 @@ namespace Lemon
                         target.WriterParameters.SymbolWriterProvider = null;
                     }
 
-                    var assembly = AssemblyDefinition.ReadAssembly(target.AssemblyPath, target.ReaderParameters);
+                    AssemblyDefinition assembly = null;
+
+                    if (target.IsFile)
+                    {
+                        assembly = AssemblyDefinition.ReadAssembly(target.AssemblyPath, target.ReaderParameters);
+                    }
+                    else
+                    {
+                        var mainStream = target.StreamInfo.MainStream;
+                        mainStream.Seek(0, SeekOrigin.Begin);
+
+                        if (ProcessDebugSymbols && target.StreamInfo.SymbolStream != null)
+                        {
+                            var symbolStream = target.StreamInfo.SymbolStream;
+                            symbolStream.Seek(0, SeekOrigin.Begin);
+
+                            target.ReaderParameters.SymbolStream = symbolStream;
+                            target.WriterParameters.SymbolStream = symbolStream;
+                        }
+
+                        assembly = AssemblyDefinition.ReadAssembly(mainStream, target.ReaderParameters);
+                    }
+
                     if (assembly == null)
                     {
                         _log("Couldn't load: " + target.Name);
@@ -227,12 +328,12 @@ namespace Lemon
                 catch (System.BadImageFormatException)
                 {
                     _log("not managed dll. skipping." + target.Name);
-                    _targetInfos.Remove(pair.Key);
+                    _targetInfos.Remove(target);
                     continue;
                 }
             }
 
-            var values = _targetInfos.Values.Select(p => p.OpenAssemblyDefinition).ToList();
+            var values = _targetInfos.Select(p => p.OpenAssemblyDefinition).ToList();
             return values;
         }
 
@@ -271,15 +372,28 @@ namespace Lemon
     public class TargetDllInfo
     {
         public FileInfo FileInfo;
-        public string AssemblyPath => FileInfo.FullName;
-        public string Name => FileInfo.Name;
+        public string AssemblyPath => IsFile ? FileInfo.FullName : null;
+        public string Name => IsFile ? FileInfo.Name : StreamInfo.Name;
         public string AssemblyName { get; internal set; }
         public string AssemblyFullName { get; internal set; }
+        public StreamInfo StreamInfo { get; internal set; }
+
+        public bool IsFile => StreamInfo == null;
 
         public string SymbolPath;
         public ReaderParameters ReaderParameters;
         public WriterParameters WriterParameters;
 
         public AssemblyDefinition OpenAssemblyDefinition;
+    }
+
+    public class StreamInfo
+    {
+        public Stream MainStream;
+        public Stream SymbolStream;
+        public SymbolType SymbolType;
+        public string Name;
+        public MemoryStream OutputMainStream;
+        public MemoryStream OutputSymbolStream;
     }
 }
